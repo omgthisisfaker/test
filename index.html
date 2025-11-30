@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ESP32 鋼琴教學模式 (防呆版)</title>
+    <title>ESP32 鋼琴教學模式 (完整長曲版)</title>
     <style>
         body { background-color: #222; color: white; text-align: center; font-family: sans-serif; user-select: none; touch-action: manipulation;}
         
@@ -25,17 +25,17 @@
 
     <div class="controls">
         <select id="songSelect">
-            <option value="scale">🎵 音階練習 (Do Re Mi)</option>
-            <option value="bee">🐝 小蜜蜂</option>
-            <option value="star">🌟 小星星</option>
-            <option value="happy">🎂 生日快樂歌</option>
+            <option value="bee">🐝 小蜜蜂 (完整版)</option>
+            <option value="star">🌟 小星星 (完整版)</option>
+            <option value="happy">🎂 生日快樂歌 (修正版)</option>
+            <option value="tiger">🐯 兩隻老虎 (新增)</option>
         </select>
         <button id="connectBtn">連接鋼琴</button>
     </div>
 
     <div id="status">請選擇曲目並連接藍牙</div>
     
-    <div id="targetDisplay">目標: Do</div>
+    <div id="targetDisplay">目標: Sol</div>
     <div id="progressBar"><div id="progressFill"></div></div>
     
     <div id="piano-container"></div>
@@ -45,15 +45,47 @@
         const RX_UUID      = "6e400002-b5a3-f393-e0a9-e50e24dcca9e"; 
         const TX_UUID      = "6e400003-b5a3-f393-e0a9-e50e24dcca9e"; 
 
+        // --- 完整樂譜資料庫 ---
         const songs = {
-            "scale": [1, 2, 3, 4, 5, 6, 7],
-            "bee":   [5, 3, 3, 4, 2, 2, 1, 2, 3, 4, 5, 5, 5],
-            "star":  [1, 1, 5, 5, 6, 6, 5, 4, 4, 3, 3, 2, 2, 1],
-            "happy": [5, 5, 6, 5, 1, 7, 5, 5, 6, 5, 2, 1]
+            // 小蜜蜂 (完整結構 A-B-A)
+            "bee":   [
+                5, 3, 3, 4, 2, 2, 1, 2, 3, 4, 5, 5, 5, // 嗡嗡嗡 大家一起去做工
+                5, 3, 3, 4, 2, 2, 1, 3, 5, 5, 1,       // 來匆匆 去匆匆 做工興味濃
+                2, 2, 2, 2, 2, 3, 4,                   // 天暖花好不做工
+                3, 3, 3, 3, 3, 4, 5,                   // 將來哪裡好過冬
+                5, 3, 3, 4, 2, 2, 1, 3, 5, 5, 1        // 嗡嗡嗡 別學懶惰蟲
+            ],
+            
+            // 小星星 (完整版)
+            "star":  [
+                1, 1, 5, 5, 6, 6, 5,   // 一閃一閃亮晶晶
+                4, 4, 3, 3, 2, 2, 1,   // 滿天都是小星星
+                5, 5, 4, 4, 3, 3, 2,   // 掛在天上放光明
+                5, 5, 4, 4, 3, 3, 2,   // 好像許多小眼睛
+                1, 1, 5, 5, 6, 6, 5,   // 一閃一閃亮晶晶
+                4, 4, 3, 3, 2, 2, 1    // 滿天都是小星星
+            ],
+
+            // 生日快樂 (移調修正版，讓旋律落在 1-7 區間)
+            "happy": [
+                1, 1, 2, 1, 4, 3,      // 祝你生日快樂
+                1, 1, 2, 1, 5, 4,      // 祝你生日快樂
+                1, 1, 1, 6, 4, 3, 2,   // 祝你生日快樂 (第三個1原本是高音Do，這裡用1代替)
+                7, 7, 6, 4, 5, 4       // 祝你生日快樂 (修正結尾)
+            ],
+
+            // 兩隻老虎 (新歌)
+            "tiger": [
+                1, 2, 3, 1, 1, 2, 3, 1, // 兩隻老虎 兩隻老虎
+                3, 4, 5, 3, 4, 5,       // 跑得快 跑得快
+                5, 6, 5, 4, 3, 1,       // 一隻沒有耳朵
+                5, 6, 5, 4, 3, 1,       // 一隻沒有尾巴
+                2, 5, 1, 2, 5, 1        // 真奇怪 真奇怪 (中間的5原本是低音，這裡用一般5代替)
+            ]
         };
 
         const notesName = ["", "Do", "Re", "Mi", "Fa", "Sol", "La", "Si"];
-        let currentSong = songs["scale"];
+        let currentSong = songs["bee"]; // 預設改為小蜜蜂
         let noteIndex = 0;
         
         let bleDevice, rxChar;
@@ -101,6 +133,8 @@
             updateGameUI();
             sendLightCommand();
             document.getElementById('status').innerText = "已切換曲目";
+            // 讓選單失去焦點，避免按空白鍵或 Enter 時誤觸選單
+            this.blur();
         });
 
         document.getElementById('connectBtn').addEventListener('click', async () => {
@@ -120,7 +154,7 @@
                 await txChar.startNotifications();
                 txChar.addEventListener('characteristicvaluechanged', handleInput);
 
-                document.getElementById("status").innerText = "已連線！教學模式啟動";
+                document.getElementById("status").innerText = "已連線！";
                 document.getElementById("connectBtn").style.display = "none";
                 document.getElementById("songSelect").disabled = false;
                 
@@ -145,15 +179,14 @@
 
                 if (press) {
                     // === 按下 ===
-                    keyDiv.classList.add("active"); // 畫面還是會閃一下，讓你知道按鈕沒壞
+                    keyDiv.classList.add("active");
                     
-                    // 【修正重點】只有按對了，才會發出聲音
+                    // 防呆：只有按對了才發聲
                     if (userNote == targetNote) {
-                        playSound(userNote); // <--- 移到這裡了！
+                        playSound(userNote);
                         isPressed = true;
                         document.getElementById("targetDisplay").style.color = "#6eff6e";
                     } else {
-                        // 按錯了：不發聲，只顯示錯誤訊息
                         document.getElementById("targetDisplay").innerText = "錯了！請按 " + notesName[targetNote];
                         document.getElementById("targetDisplay").style.color = "red";
                     }
@@ -168,11 +201,16 @@
 
                         if (noteIndex >= currentSong.length) {
                             noteIndex = 0;
-                            alert("恭喜完成！再一次！");
+                            // 使用 setTimeout 讓彈完最後一個音稍作停留再跳出通知
+                            setTimeout(() => {
+                                alert("恭喜完成全曲！");
+                                updateGameUI();
+                                sendLightCommand();
+                            }, 200);
+                        } else {
+                            updateGameUI();
+                            sendLightCommand(); 
                         }
-
-                        updateGameUI();
-                        sendLightCommand(); 
                     }
                 }
             }
