@@ -3,31 +3,33 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ESP32 Piano Game</title>
+    <title>ESP32 Piano Solo</title>
     <style>
-        body { background-color: #333; color: white; text-align: center; font-family: sans-serif; user-select: none;}
-        #connectBtn { font-size: 20px; padding: 10px 20px; background: #007bff; color: white; border: none; border-radius: 5px; margin: 20px; }
-        .key { width: 90%; height: 60px; margin: 10px auto; background: white; border-radius: 10px; color: black; line-height: 60px; font-size: 24px; font-weight: bold; border: 5px solid #000;}
-        .active { background-color: #6eff6e; }
-        .target { border-color: #ff4444; }
-        #status { font-size: 18px; color: #aaa; margin-bottom: 20px;}
-        #targetDisplay { font-size: 40px; color: yellow; margin: 10px;}
+        body { background-color: #222; color: white; text-align: center; font-family: sans-serif; user-select: none; touch-action: manipulation;}
+        #connectBtn { font-size: 22px; padding: 15px 30px; background: #00d4ff; color: #000; border: none; border-radius: 50px; margin: 30px; font-weight: bold; box-shadow: 0 0 15px #00d4ff;}
+        
+        .key { width: 90%; height: 60px; margin: 10px auto; background: white; border-radius: 10px; color: black; line-height: 60px; font-size: 24px; font-weight: bold; border: 5px solid #000; transition: all 0.1s;}
+        .active { background-color: #6eff6e; transform: scale(0.95); }
+        .target { border-color: #ff4444; box-shadow: 0 0 10px #ff4444; }
+        
+        #targetDisplay { font-size: 50px; color: yellow; margin: 20px; text-shadow: 2px 2px 0 #000;}
+        #status { color: #888; margin-bottom: 20px;}
     </style>
 </head>
 <body>
 
-    <button id="connectBtn">連接藍牙 (ESP32 BLE)</button>
-    <div id="status">未連線</div>
+    <button id="connectBtn">🎵 開始連接鋼琴</button>
+    <div id="status">請確保 ESP32 已通電</div>
     <div id="targetDisplay">目標: Do</div>
     <div id="piano-container"></div>
 
     <script>
-        // --- 設定與變數 ---
-        const serviceUUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
-        const txUUID = "6e400003-b5a3-f393-e0a9-e50e24dcca9e"; // 收
-        const rxUUID = "6e400002-b5a3-f393-e0a9-e50e24dcca9e"; // 發
+        // UUID 設定 (與 ESP32 程式碼一致)
+        const SERVICE_UUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
+        const RX_UUID      = "6e400002-b5a3-f393-e0a9-e50e24dcca9e"; // 寫入 (燈)
+        const TX_UUID      = "6e400003-b5a3-f393-e0a9-e50e24dcca9e"; // 通知 (按鈕)
 
-        let bleDevice, bleServer, rxChar, txChar;
+        let bleDevice, rxChar;
         let currentTarget = 1;
         let isPressed = false;
         const notes = ["", "Do", "Re", "Mi", "Fa", "Sol", "La", "Si"];
@@ -36,86 +38,79 @@
         const sounds = {};
         for(let i=1; i<=7; i++) sounds[i] = new Audio(i + ".wav");
 
-        // 產生琴鍵 UI
+        // 建立琴鍵介面
         const container = document.getElementById("piano-container");
         for(let i=1; i<=7; i++) {
             let div = document.createElement("div");
-            div.className = "key";
-            div.id = "key-" + i;
-            div.innerText = notes[i];
+            div.className = "key"; div.id = "key-" + i; div.innerText = notes[i];
             container.appendChild(div);
         }
         updateUI();
 
-        // --- 藍牙連線 ---
+        // --- 連線邏輯 ---
         document.getElementById('connectBtn').addEventListener('click', async () => {
             try {
-                // 1. 搜尋裝置
                 document.getElementById("status").innerText = "搜尋中...";
                 bleDevice = await navigator.bluetooth.requestDevice({
-                    filters: [{ name: 'ESP32 Piano' }],
-                    optionalServices: [serviceUUID]
+                    filters: [{ name: 'ESP32 Piano Solo' }],
+                    optionalServices: [SERVICE_UUID]
                 });
 
-                // 2. 連線
-                bleServer = await bleDevice.gatt.connect();
-                const service = await bleServer.getPrimaryService(serviceUUID);
+                const server = await bleDevice.gatt.connect();
+                const service = await server.getPrimaryService(SERVICE_UUID);
                 
-                // 3. 取得特徵
-                rxChar = await service.getCharacteristic(rxUUID); // 寫入 (控制燈)
-                txChar = await service.getCharacteristic(txUUID); // 接收 (監聽按鈕)
+                rxChar = await service.getCharacteristic(RX_UUID); // 準備傳指令
+                const txChar = await service.getCharacteristic(TX_UUID); // 準備收訊號
 
-                // 4. 開啟通知 (監聽 ESP32 傳來的訊息)
                 await txChar.startNotifications();
                 txChar.addEventListener('characteristicvaluechanged', handleInput);
 
-                document.getElementById("status").innerText = "已連線！";
+                document.getElementById("status").innerText = "已連線！遊戲開始";
                 document.getElementById("connectBtn").style.display = "none";
                 
-                // 開始遊戲迴圈 (發送指令亮燈)
-                sendLightCommand();
+                sendLightCommand(); // 亮第一個燈
 
             } catch (error) {
-                console.error(error);
-                document.getElementById("status").innerText = "連線失敗: " + error;
+                alert("連線失敗：" + error);
+                document.getElementById("status").innerText = "連線失敗";
             }
         });
 
-        // --- 處理來自 ESP32 的資料 ---
+        // --- 處理 ESP32 傳來的按鍵訊號 ---
         function handleInput(event) {
             let val = new TextDecoder().decode(event.target.value);
             let char = val.charAt(0);
             
-            let note = -1;
-            let press = false;
+            let note = -1; let press = false;
 
-            if (char >= 'A' && char <= 'G') { note = char.charCodeAt(0) - 64; press = true; } // A=65
-            else if (char >= 'a' && char <= 'g') { note = char.charCodeAt(0) - 96; press = false; } // a=97
+            if (char >= 'A' && char <= 'G') { note = char.charCodeAt(0) - 64; press = true; } 
+            else if (char >= 'a' && char <= 'g') { note = char.charCodeAt(0) - 96; press = false; }
 
             if (note >= 1 && note <= 7) {
                 let keyDiv = document.getElementById("key-" + note);
                 if (press) {
+                    // 按下
                     keyDiv.classList.add("active");
-                    // 播放聲音 (重置播放時間以支援連點)
                     sounds[note].currentTime = 0;
                     sounds[note].play();
 
                     if (note == currentTarget) isPressed = true;
                 } else {
+                    // 放開
                     keyDiv.classList.remove("active");
-                    // 過關判定
+                    
+                    // 過關判定：放開的是目標鍵，且剛才確實有按下去
                     if (note == currentTarget && isPressed) {
                         isPressed = false;
                         currentTarget++;
-                        if (currentTarget > 7) currentTarget = 1;
+                        if (currentTarget > 7) currentTarget = 1; // 循環
                         updateUI();
-                        sendLightCommand();
+                        sendLightCommand(); // 亮下一個燈
                     }
                 }
             }
         }
 
-        // 發送亮燈指令給 ESP32
         async function sendLightCommand() {
             if (rxChar) {
                 let data = new TextEncoder().encode(currentTarget.toString());
@@ -125,7 +120,6 @@
 
         function updateUI() {
             document.getElementById("targetDisplay").innerText = "目標: " + notes[currentTarget];
-            // 更新紅色目標框
             for(let i=1; i<=7; i++) {
                 let el = document.getElementById("key-" + i);
                 if(i === currentTarget) el.classList.add("target");
