@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ESP32 鋼琴 (完美音高版)</title>
+    <title>ESP32 鋼琴 (兩隻老虎修正版)</title>
     <style>
         body { background-color: #222; color: white; text-align: center; font-family: sans-serif; user-select: none; touch-action: manipulation;}
         
@@ -27,13 +27,13 @@
         <select id="songSelect">
             <option value="bee">🐝 小蜜蜂</option>
             <option value="star">🌟 小星星</option>
-            <option value="happy">🎂 生日快樂歌 (完美版)</option>
-            <option value="tiger">🐯 兩隻老虎 (完美版)</option>
+            <option value="happy">🎂 生日快樂歌</option>
+            <option value="tiger">🐯 兩隻老虎 (修正版)</option>
         </select>
         <button id="connectBtn">連接鋼琴</button>
     </div>
 
-    <div id="status">請上傳 0.wav 和 8.wav 以獲得最佳體驗</div>
+    <div id="status">請確認已上傳 0.wav (低音Sol)</div>
     
     <div id="targetDisplay">目標: Sol</div>
     <div id="progressBar"><div id="progressFill"></div></div>
@@ -46,7 +46,6 @@
         const TX_UUID      = "6e400003-b5a3-f393-e0a9-e50e24dcca9e"; 
 
         // --- 樂譜資料庫 ---
-        // 這裡的數字代表「要亮哪顆燈」以及「要按哪顆鍵」
         const songs = {
             "bee": [
                 5, 3, 3, 4, 2, 2, 1, 2, 3, 4, 5, 5, 5,
@@ -66,35 +65,37 @@
             "happy": [
                 1, 1, 2, 1, 4, 3,
                 1, 1, 2, 1, 5, 4,
-                1, 1, 1, 6, 4, 3, 2, // 第三個 1 是高潮，要發高音
+                1, 1, 1, 6, 4, 3, 2, 
                 7, 7, 6, 4, 5, 4
             ],
             "tiger": [
-                1, 2, 3, 1, 1, 2, 3, 1,
-                3, 4, 5, 3, 4, 5,
-                5, 6, 5, 4, 3, 1,
-                5, 6, 5, 4, 3, 1,
-                2, 5, 1, 2, 5, 1 // 中間的 5 要發低音
+                1, 2, 3, 1,       // 兩隻老虎
+                1, 2, 3, 1,       // 兩隻老虎
+                3, 4, 5,          // 跑得快
+                3, 4, 5,          // 跑得快
+                5, 6, 5, 4, 3, 1, // 一隻沒有耳朵
+                5, 6, 5, 4, 3, 1, // 一隻沒有尾巴
+                1, 5, 1,          // 真奇怪 (中間的5是低音)
+                1, 5, 1           // 真奇怪 (中間的5是低音)
             ]
         };
 
-        // --- 特殊音高對照表 (Magic Map) ---
-        // 格式: "曲目名稱": { "第幾個音(索引)": "要播放的特殊音效ID" }
-        // 索引從 0 開始算
+        // --- 特殊音高對照表 ---
+        // 修正了兩隻老虎的索引，對應到新的樂譜結構
         const soundOverrides = {
             "happy": {
-                14: 8 // 生日快樂歌第 15 個音(索引14)，按鍵是1，但聲音播 8.wav (高音Do)
+                14: 8 // 高音 Do
             },
             "tiger": {
-                25: 0, // 兩隻老虎第 26 個音，按鍵是5，但聲音播 0.wav (低音Sol)
-                29: 0  // 兩隻老虎第 30 個音，同上
+                27: 0, // 第一句「真奇怪」的中間那個 Sol -> 播 0.wav (低音Sol)
+                30: 0  // 第二句「真奇怪」的中間那個 Sol -> 播 0.wav (低音Sol)
             }
         };
 
         const notesName = ["", "Do", "Re", "Mi", "Fa", "Sol", "La", "Si"];
         let currentSong = songs["bee"];
         let noteIndex = 0;
-        let selectedSongKey = "bee"; // 紀錄目前選到的歌名
+        let selectedSongKey = "bee";
         
         let bleDevice, rxChar;
         let isPressed = false;
@@ -108,7 +109,7 @@
                 if(!response.ok) throw new Error("File not found");
                 const arrayBuffer = await response.arrayBuffer();
                 audioBuffers[i] = await audioCtx.decodeAudioData(arrayBuffer);
-            } catch(e) { console.log("音效 " + i + " 尚未上傳 (如果是 0 或 8 可暫時忽略)"); }
+            } catch(e) { console.log("缺少音效: " + i + ".wav"); }
         }
 
         function playSound(soundId) {
@@ -118,16 +119,15 @@
                 source.connect(audioCtx.destination);
                 source.start(0);
             } else {
-                // 如果找不到特殊音效 (例如 8.wav 沒上傳)，就退回去播原本的聲音
-                console.log("缺少音效: " + soundId + ".wav");
+                console.log("播放失敗: " + soundId);
             }
         }
 
-        // 預載 1~7 以及特殊的 0, 8
+        // 預載 0~8
         Promise.all([
             loadSound(1), loadSound(2), loadSound(3), 
             loadSound(4), loadSound(5), loadSound(6), loadSound(7),
-            loadSound(0), loadSound(8) // 新增這兩個
+            loadSound(0), loadSound(8)
         ]).then(() => {
             document.getElementById("status").innerText = "音效載入完成，請連接";
         });
@@ -194,18 +194,13 @@
                     keyDiv.classList.add("active");
                     
                     if (userNote == targetNote) {
-                        // === 關鍵修改：判斷是否要播放特殊音效 ===
-                        let soundToPlay = userNote; // 預設播原本的音 (例如按1播1)
-
-                        // 檢查現在這首歌、這個進度，有沒有特殊指定
+                        // 檢查特殊音效 (0.wav 或 8.wav)
+                        let soundToPlay = userNote;
                         if (soundOverrides[selectedSongKey] && soundOverrides[selectedSongKey][noteIndex] !== undefined) {
                             soundToPlay = soundOverrides[selectedSongKey][noteIndex];
-                            console.log("觸發特殊音效: " + soundToPlay);
                         }
 
                         playSound(soundToPlay);
-                        // ==========================================
-
                         isPressed = true;
                         document.getElementById("targetDisplay").style.color = "#6eff6e";
                     } else {
@@ -244,8 +239,8 @@
         function updateGameUI() {
             let targetNote = currentSong[noteIndex];
             
-            // 如果是特殊音，加個提示符號
             let displayName = notesName[targetNote];
+            // 顯示特殊音提示
             if (soundOverrides[selectedSongKey] && soundOverrides[selectedSongKey][noteIndex] == 8) {
                 displayName += " (高音!)";
             } else if (soundOverrides[selectedSongKey] && soundOverrides[selectedSongKey][noteIndex] == 0) {
