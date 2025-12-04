@@ -3,50 +3,64 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ESP32 鋼琴 (兩隻老虎修正版)</title>
+    <title>ESP32 5鍵小鋼琴</title>
     <style>
         body { background-color: #222; color: white; text-align: center; font-family: sans-serif; user-select: none; touch-action: manipulation;}
         
         .controls { margin: 20px; padding: 10px; background: #333; border-radius: 15px; display: inline-block;}
         select { font-size: 20px; padding: 10px; border-radius: 5px; margin-right: 10px; }
-        #connectBtn { font-size: 20px; padding: 10px 20px; background: #00d4ff; color: #000; border: none; border-radius: 5px; font-weight: bold; cursor: pointer;}
         
-        .key { width: 90%; height: 60px; margin: 10px auto; background: white; border-radius: 10px; color: black; line-height: 60px; font-size: 24px; font-weight: bold; border: 5px solid #000; transition: transform 0.05s;}
+        .btn-connect { font-size: 18px; padding: 10px 15px; border: none; border-radius: 5px; font-weight: bold; cursor: pointer; margin: 5px;}
+        #btnBtn { background: #00d4ff; color: #000; }
+        #btnLed { background: #ff4444; color: #fff; }
+        .connected { opacity: 0.5; cursor: default; }
+
+        /* 調整按鍵寬度，因為變少了，可以做大一點 */
+        .key { width: 18%; height: 120px; margin: 5px; display: inline-block; background: white; border-radius: 10px; color: black; line-height: 120px; font-size: 30px; font-weight: bold; border: 5px solid #000; transition: transform 0.05s;}
         .active { background-color: #6eff6e; transform: scale(0.95); }
-        .target { border-color: #ff4444; box-shadow: 0 0 15px #ff4444; z-index: 10; position: relative;}
+        .target { border-color: #ff4444; box-shadow: 0 0 20px #ff4444; z-index: 10; position: relative; background-color: #fff0f0;}
         
-        #targetDisplay { font-size: 40px; color: yellow; margin: 20px; min-height: 50px;}
-        #progressBar { width: 80%; height: 10px; background: #555; margin: 10px auto; border-radius: 5px; overflow: hidden; }
+        #targetDisplay { font-size: 50px; color: yellow; margin: 20px; min-height: 60px;}
+        #progressBar { width: 80%; height: 15px; background: #555; margin: 10px auto; border-radius: 10px; overflow: hidden; }
         #progressFill { height: 100%; background: #00d4ff; width: 0%; transition: width 0.3s; }
         #status { color: #888; margin-bottom: 20px;}
+        #piano-container { display: flex; justify-content: center; padding: 10px; }
     </style>
 </head>
 <body>
 
     <div class="controls">
         <select id="songSelect">
+            <option value="scale">🎵 音階練習 (1-5)</option>
             <option value="bee">🐝 小蜜蜂</option>
-            <option value="star">🌟 小星星</option>
-            <option value="happy">🎂 生日快樂歌</option>
-            <option value="tiger">🐯 兩隻老虎 (修正版)</option>
+            <option value="lamb">🐑 瑪莉有隻小綿羊</option>
+            <option value="joy">🎼 歡樂頌 (貝多芬)</option>
         </select>
-        <button id="connectBtn">連接鋼琴</button>
+        <br>
+        <button id="btnBtn" class="btn-connect">1. 連接按鈕板</button>
+        <button id="btnLed" class="btn-connect">2. 連接燈光板</button>
     </div>
 
-    <div id="status">請確認已上傳 0.wav (低音Sol)</div>
+    <div id="status">請連接兩個 ESP32</div>
     
-    <div id="targetDisplay">目標: Sol</div>
+    <div id="targetDisplay">目標: Do</div>
     <div id="progressBar"><div id="progressFill"></div></div>
     
     <div id="piano-container"></div>
 
     <script>
-        const SERVICE_UUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
-        const RX_UUID      = "6e400002-b5a3-f393-e0a9-e50e24dcca9e"; 
-        const TX_UUID      = "6e400003-b5a3-f393-e0a9-e50e24dcca9e"; 
+        // UUID 設定
+        const BTN_SERVICE = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
+        const BTN_TX_UUID = "6e400003-b5a3-f393-e0a9-e50e24dcca9e"; 
+        const LED_SERVICE = "6e400001-b5a3-f393-e0a9-e50e24dcca9f";
+        const LED_RX_UUID = "6e400002-b5a3-f393-e0a9-e50e24dcca9f";
 
-        // --- 樂譜資料庫 ---
+        // --- 5音專用樂譜 ---
         const songs = {
+            // 音階
+            "scale": [1, 2, 3, 4, 5, 5, 4, 3, 2, 1],
+            
+            // 小蜜蜂 (只需要 1~5)
             "bee": [
                 5, 3, 3, 4, 2, 2, 1, 2, 3, 4, 5, 5, 5,
                 5, 3, 3, 4, 2, 2, 1, 3, 5, 5, 1,
@@ -54,86 +68,62 @@
                 3, 3, 3, 3, 3, 4, 5,
                 5, 3, 3, 4, 2, 2, 1, 3, 5, 5, 1
             ],
-            "star": [
-                1, 1, 5, 5, 6, 6, 5,
-                4, 4, 3, 3, 2, 2, 1,
-                5, 5, 4, 4, 3, 3, 2,
-                5, 5, 4, 4, 3, 3, 2,
-                1, 1, 5, 5, 6, 6, 5,
-                4, 4, 3, 3, 2, 2, 1
+
+            // 瑪莉有隻小綿羊 (只需要 1, 2, 3, 5)
+            "lamb": [
+                3, 2, 1, 2, 3, 3, 3,
+                2, 2, 2, 3, 5, 5,
+                3, 2, 1, 2, 3, 3, 3, 
+                3, 2, 2, 3, 2, 1
             ],
-            "happy": [
-                1, 1, 2, 1, 4, 3,
-                1, 1, 2, 1, 5, 4,
-                1, 1, 1, 6, 4, 3, 2, 
-                7, 7, 6, 4, 5, 4
-            ],
-            "tiger": [
-                1, 2, 3, 1,       // 兩隻老虎
-                1, 2, 3, 1,       // 兩隻老虎
-                3, 4, 5,          // 跑得快
-                3, 4, 5,          // 跑得快
-                5, 6, 5, 4, 3, 1, // 一隻沒有耳朵
-                5, 6, 5, 4, 3, 1, // 一隻沒有尾巴
-                1, 5, 1,          // 真奇怪 (中間的5是低音)
-                1, 5, 1           // 真奇怪 (中間的5是低音)
+
+            // 歡樂頌 (主題部分只需要 1~5)
+            "joy": [
+                3, 3, 4, 5, 5, 4, 3, 2,
+                1, 1, 2, 3, 3, 2, 2,
+                3, 3, 4, 5, 5, 4, 3, 2,
+                1, 1, 2, 3, 2, 1, 1
             ]
         };
 
-        // --- 特殊音高對照表 ---
-        // 修正了兩隻老虎的索引，對應到新的樂譜結構
-        const soundOverrides = {
-            "happy": {
-                14: 8 // 高音 Do
-            },
-            "tiger": {
-                27: 0, // 第一句「真奇怪」的中間那個 Sol -> 播 0.wav (低音Sol)
-                30: 0  // 第二句「真奇怪」的中間那個 Sol -> 播 0.wav (低音Sol)
-            }
-        };
-
-        const notesName = ["", "Do", "Re", "Mi", "Fa", "Sol", "La", "Si"];
-        let currentSong = songs["bee"];
+        const notesName = ["", "Do", "Re", "Mi", "Fa", "Sol"]; // 只用到 1~5
+        let currentSong = songs["scale"];
         let noteIndex = 0;
-        let selectedSongKey = "bee";
         
-        let bleDevice, rxChar;
+        let rxCharLED;
         let isPressed = false;
+        let isBtnConnected = false;
+        let isLedConnected = false;
 
         const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
         const audioBuffers = {}; 
 
         async function loadSound(i) {
             try {
+                // 只需要載入 1.wav ~ 5.wav
                 const response = await fetch(i + '.wav');
-                if(!response.ok) throw new Error("File not found");
+                if(!response.ok) throw new Error("Missing");
                 const arrayBuffer = await response.arrayBuffer();
                 audioBuffers[i] = await audioCtx.decodeAudioData(arrayBuffer);
-            } catch(e) { console.log("缺少音效: " + i + ".wav"); }
+            } catch(e) { console.log("Missing sound: " + i); }
         }
-
         function playSound(soundId) {
             if (audioBuffers[soundId]) {
                 const source = audioCtx.createBufferSource();
                 source.buffer = audioBuffers[soundId];
                 source.connect(audioCtx.destination);
                 source.start(0);
-            } else {
-                console.log("播放失敗: " + soundId);
             }
         }
-
-        // 預載 0~8
+        
+        // 預載 1~5 即可
         Promise.all([
-            loadSound(1), loadSound(2), loadSound(3), 
-            loadSound(4), loadSound(5), loadSound(6), loadSound(7),
-            loadSound(0), loadSound(8)
-        ]).then(() => {
-            document.getElementById("status").innerText = "音效載入完成，請連接";
-        });
+            loadSound(1), loadSound(2), loadSound(3), loadSound(4), loadSound(5)
+        ]).then(() => { document.getElementById("status").innerText = "音效就緒 (1-5)"; });
 
+        // 建置 UI (只產生 5 個鍵)
         const container = document.getElementById("piano-container");
-        for(let i=1; i<=7; i++) {
+        for(let i=1; i<=5; i++) {
             let div = document.createElement("div");
             div.className = "key"; div.id = "key-" + i; div.innerText = notesName[i];
             container.appendChild(div);
@@ -141,8 +131,7 @@
         updateGameUI();
 
         document.getElementById('songSelect').addEventListener('change', function() {
-            selectedSongKey = this.value;
-            currentSong = songs[selectedSongKey];
+            currentSong = songs[this.value];
             noteIndex = 0;
             updateGameUI();
             sendLightCommand();
@@ -150,57 +139,69 @@
             this.blur();
         });
 
-        document.getElementById('connectBtn').addEventListener('click', async () => {
+        // 連接按鈕板
+        document.getElementById('btnBtn').addEventListener('click', async function() {
             if (audioCtx.state === 'suspended') { await audioCtx.resume(); }
-
             try {
-                bleDevice = await navigator.bluetooth.requestDevice({
-                    filters: [{ name: 'ESP32 Piano Fast' }],
-                    optionalServices: [SERVICE_UUID]
+                const device = await navigator.bluetooth.requestDevice({
+                    filters: [{ name: 'ESP32 5-Key BTN' }],
+                    optionalServices: [BTN_SERVICE]
                 });
-
-                const server = await bleDevice.gatt.connect();
-                const service = await server.getPrimaryService(SERVICE_UUID);
-                rxChar = await service.getCharacteristic(RX_UUID);
-                const txChar = await service.getCharacteristic(TX_UUID);
-
+                const server = await device.gatt.connect();
+                const service = await server.getPrimaryService(BTN_SERVICE);
+                const txChar = await service.getCharacteristic(BTN_TX_UUID);
                 await txChar.startNotifications();
                 txChar.addEventListener('characteristicvaluechanged', handleInput);
 
-                document.getElementById("status").innerText = "已連線！";
-                document.getElementById("connectBtn").style.display = "none";
-                document.getElementById("songSelect").disabled = false;
-                
-                sendLightCommand();
-
-            } catch (error) {
-                alert("連線失敗：" + error);
-            }
+                this.innerText = "按鈕板 OK";
+                this.classList.add("connected");
+                isBtnConnected = true;
+                checkAllConnected();
+            } catch (e) { alert("按鈕板連線失敗: " + e); }
         });
+
+        // 連接燈光板
+        document.getElementById('btnLed').addEventListener('click', async function() {
+            try {
+                const device = await navigator.bluetooth.requestDevice({
+                    filters: [{ name: 'ESP32 5-Key LED' }],
+                    optionalServices: [LED_SERVICE]
+                });
+                const server = await device.gatt.connect();
+                const service = await server.getPrimaryService(LED_SERVICE);
+                rxCharLED = await service.getCharacteristic(LED_RX_UUID);
+
+                this.innerText = "燈光板 OK";
+                this.classList.add("connected");
+                isLedConnected = true;
+                checkAllConnected();
+            } catch (e) { alert("燈光板連線失敗: " + e); }
+        });
+
+        function checkAllConnected() {
+            if(isBtnConnected && isLedConnected) {
+                document.getElementById('status').innerText = "雙板連線成功！";
+                sendLightCommand();
+            }
+        }
 
         function handleInput(event) {
             let val = new TextDecoder().decode(event.target.value);
             let char = val.charAt(0);
             let userNote = -1; let press = false;
 
-            if (char >= 'A' && char <= 'G') { userNote = char.charCodeAt(0) - 64; press = true; } 
-            else if (char >= 'a' && char <= 'g') { userNote = char.charCodeAt(0) - 96; press = false; }
+            // A~E 對應 1~5
+            if (char >= 'A' && char <= 'E') { userNote = char.charCodeAt(0) - 64; press = true; } 
+            else if (char >= 'a' && char <= 'e') { userNote = char.charCodeAt(0) - 96; press = false; }
 
-            if (userNote >= 1 && userNote <= 7) {
+            if (userNote >= 1 && userNote <= 5) {
                 let keyDiv = document.getElementById("key-" + userNote);
                 let targetNote = currentSong[noteIndex];
 
                 if (press) {
                     keyDiv.classList.add("active");
-                    
                     if (userNote == targetNote) {
-                        // 檢查特殊音效 (0.wav 或 8.wav)
-                        let soundToPlay = userNote;
-                        if (soundOverrides[selectedSongKey] && soundOverrides[selectedSongKey][noteIndex] !== undefined) {
-                            soundToPlay = soundOverrides[selectedSongKey][noteIndex];
-                        }
-
-                        playSound(soundToPlay);
+                        playSound(userNote);
                         isPressed = true;
                         document.getElementById("targetDisplay").style.color = "#6eff6e";
                     } else {
@@ -214,11 +215,7 @@
                         noteIndex++; 
                         if (noteIndex >= currentSong.length) {
                             noteIndex = 0;
-                            setTimeout(() => {
-                                alert("恭喜完成全曲！");
-                                updateGameUI();
-                                sendLightCommand();
-                            }, 200);
+                            setTimeout(() => { alert("完成！"); updateGameUI(); sendLightCommand(); }, 200);
                         } else {
                             updateGameUI();
                             sendLightCommand(); 
@@ -229,33 +226,23 @@
         }
 
         async function sendLightCommand() {
-            if (rxChar) {
+            if (rxCharLED) {
                 let targetNote = currentSong[noteIndex];
                 let data = new TextEncoder().encode(targetNote.toString());
-                await rxChar.writeValue(data);
+                await rxCharLED.writeValue(data);
             }
         }
 
         function updateGameUI() {
             let targetNote = currentSong[noteIndex];
-            
-            let displayName = notesName[targetNote];
-            // 顯示特殊音提示
-            if (soundOverrides[selectedSongKey] && soundOverrides[selectedSongKey][noteIndex] == 8) {
-                displayName += " (高音!)";
-            } else if (soundOverrides[selectedSongKey] && soundOverrides[selectedSongKey][noteIndex] == 0) {
-                displayName += " (低音!)";
-            }
-
-            document.getElementById("targetDisplay").innerText = "目標: " + displayName;
+            document.getElementById("targetDisplay").innerText = "目標: " + notesName[targetNote];
             document.getElementById("targetDisplay").style.color = "yellow";
 
-            for(let i=1; i<=7; i++) {
+            for(let i=1; i<=5; i++) {
                 let el = document.getElementById("key-" + i);
                 if(i === targetNote) el.classList.add("target");
                 else el.classList.remove("target");
             }
-
             let progress = (noteIndex / currentSong.length) * 100;
             document.getElementById("progressFill").style.width = progress + "%";
         }
