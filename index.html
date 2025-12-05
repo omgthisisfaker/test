@@ -2,188 +2,162 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>ESP32 音樂反應遊戲</title>
+    <title>ESP32 音樂反應挑戰 (5鍵版)</title>
     <style>
-        body { font-family: 'Microsoft JhengHei', sans-serif; text-align: center; background: #222; color: white; }
-        .box { border: 1px solid #555; padding: 20px; margin: 10px auto; max-width: 500px; border-radius: 10px; background: #333; }
-        button { padding: 10px 20px; font-size: 16px; cursor: pointer; border-radius: 5px; border: none; }
-        .btn-connect { background: #007bff; color: white; margin: 5px; }
-        .btn-start { background: #28a745; color: white; font-size: 24px; padding: 15px 40px; margin-top: 20px; display: none;}
+        body { font-family: 'Microsoft JhengHei', sans-serif; text-align: center; background: #222; color: white; padding-top: 20px;}
+        .box { border: 1px solid #555; padding: 20px; margin: 15px auto; max-width: 500px; border-radius: 10px; background: #333; }
+        button { padding: 10px 20px; font-size: 16px; cursor: pointer; border-radius: 5px; border: none; margin: 5px;}
+        .btn-connect { background: #007bff; color: white; }
+        .btn-start { background: #28a745; color: white; font-size: 24px; padding: 15px 40px; display: none;}
         .status-ok { color: #4cff00; font-weight: bold; }
         
-        #gameArea { margin-top: 30px; font-size: 20px; display: none; }
-        .current-note { font-size: 60px; color: yellow; font-weight: bold; margin: 20px 0; }
-        .timer { font-size: 30px; color: #00d2ff; }
-        .score-display { letter-spacing: 5px; color: #aaa; margin-top: 10px;}
-        .highlight { color: yellow; text-decoration: underline; }
+        #gameArea { display: none; margin-top: 30px; }
+        .timer { font-size: 40px; color: #00d2ff; font-family: monospace; }
+        .note-display { font-size: 80px; color: yellow; font-weight: bold; margin: 20px 0; }
+        .score-text { color: #aaa; margin-top: 10px; font-size: 14px;}
+        .instruction { color: #ff9999; font-size: 18px; margin-bottom: 10px;}
     </style>
 </head>
 <body>
 
-    <h1>🎵 ESP32 音樂反應挑戰</h1>
+    <h1>🎵 5鍵反應速度挑戰</h1>
 
     <div class="box">
         <h3>1. 裝置連線</h3>
-        <p>LED板狀態: <span id="ledStatus">未連線 ❌</span></p>
-        <button class="btn-connect" onclick="connectLed()">連接 LED 板</button>
-        
-        <p>按鈕板狀態: <span id="btnStatus">未連線 ❌</span></p>
-        <button class="btn-connect" onclick="connectBtn()">連接 按鈕 板</button>
+        <p>LED板: <span id="ledStatus">未連線 ❌</span> <button class="btn-connect" onclick="connectLed()">連接</button></p>
+        <p>按鈕板: <span id="btnStatus">未連線 ❌</span> <button class="btn-connect" onclick="connectBtn()">連接</button></p>
     </div>
 
     <div class="box" id="controlBox">
-        <h3>2. 選擇樂譜並開始</h3>
-        <select id="songSelect" style="padding: 10px; font-size: 16px;">
-            <option value="1,1,5,5,6,6,5">小星星 (1 1 5 5 6 6 5)</option>
-            <option value="5,3,3,4,2,2,1,2,3,4,5">小蜜蜂 (5 3 3 4 2 2 1 2 3 4 5)</option>
-            <option value="1,2,3,4,5,5,4,3,2,1">音階練習 (1 2 3 4 5...)</option>
+        <h3>2. 選擇關卡</h3>
+        <select id="songSelect" style="padding: 10px; font-size: 16px; width: 80%;">
+            <option value="3,2,1,2,3,3,3,2,2,2,3,5,5">瑪莉有隻小綿羊 (3 2 1 2 3...)</option>
+            <option value="5,3,3,4,2,2,1,2,3,4,5,5,5">小蜜蜂 (5 3 3 4 2 2 1...)</option>
+            <option value="3,3,3,3,3,3,3,5,1,2,3">聖誕鈴聲 (3 3 3...)</option>
+            <option value="1,2,3,4,5,5,4,3,2,1">音階來回跑 (1 2 3 4 5...)</option>
+            <option value="1,3,5,2,4,1,5,3,4,2">魔鬼亂跳 (隨機跳動)</option>
         </select>
-        <br>
+        <br><br>
         <button id="startBtn" class="btn-start" onclick="startGame()">開始遊戲！</button>
     </div>
 
     <div id="gameArea">
-        <div class="timer">時間: <span id="timeDisplay">0.00</span> 秒</div>
-        <div id="instruction">請按下亮燈對應的按鈕！</div>
-        <div class="current-note" id="noteDisplay">-</div>
-        <div class="score-display" id="fullScore"></div>
+        <div class="instruction">請按下亮燈對應的按鈕！</div>
+        <div class="timer"><span id="timeDisplay">0.00</span> 秒</div>
+        <div class="note-display" id="currentNote">-</div>
+        <div class="score-text" id="songPreview"></div>
     </div>
 
 <script>
-    // 藍牙 UUID 設定
     const LED_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
     const LED_CHAR = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
     const BTN_UUID = "1234c201-1fb5-459e-8fcc-c5c9c331914b";
     const BTN_CHAR = "5678483e-36e1-4688-b7f5-ea07361b26a8";
 
-    let ledCharacteristic = null;
-    let isGameRunning = false;
-    let currentSong = [];
-    let noteIndex = 0;
+    let ledChar = null;
+    let isPlaying = false;
+    let song = [];
+    let index = 0;
     let startTime = 0;
-    let timerInterval = null;
+    let timerInt = null;
 
-    // --- 藍牙連線功能 ---
+    // --- 連線功能 ---
     async function connectLed() {
         try {
-            const device = await navigator.bluetooth.requestDevice({
-                filters: [{ name: 'ESP32_LED_Control' }], optionalServices: [LED_UUID]
-            });
-            const server = await device.gatt.connect();
-            const service = await server.getPrimaryService(LED_UUID);
-            ledCharacteristic = await service.getCharacteristic(LED_CHAR);
+            const dev = await navigator.bluetooth.requestDevice({filters: [{name:'ESP32_LED_Control'}], optionalServices:[LED_UUID]});
+            const srv = await dev.gatt.connect();
+            const svc = await srv.getPrimaryService(LED_UUID);
+            ledChar = await svc.getCharacteristic(LED_CHAR);
             document.getElementById('ledStatus').innerHTML = "已連線 ✅";
             document.getElementById('ledStatus').className = "status-ok";
             checkReady();
-        } catch (e) { alert("LED 連線失敗: " + e); }
+        } catch(e){alert("LED連線失敗:"+e);}
     }
 
     async function connectBtn() {
         try {
-            const device = await navigator.bluetooth.requestDevice({
-                filters: [{ name: 'ESP32_Button_Input' }], optionalServices: [BTN_UUID]
-            });
-            const server = await device.gatt.connect();
-            const service = await server.getPrimaryService(BTN_UUID);
-            const characteristic = await service.getCharacteristic(BTN_CHAR);
-            await characteristic.startNotifications();
-            characteristic.addEventListener('characteristicvaluechanged', handleButtonInput);
-            
+            const dev = await navigator.bluetooth.requestDevice({filters: [{name:'ESP32_Button_Input'}], optionalServices:[BTN_UUID]});
+            const srv = await dev.gatt.connect();
+            const svc = await srv.getPrimaryService(BTN_UUID);
+            const char = await svc.getCharacteristic(BTN_CHAR);
+            await char.startNotifications();
+            char.addEventListener('characteristicvaluechanged', onBtnPress);
             document.getElementById('btnStatus').innerHTML = "已連線 ✅";
             document.getElementById('btnStatus').className = "status-ok";
             checkReady();
-        } catch (e) { alert("按鈕連線失敗: " + e); }
+        } catch(e){alert("按鈕連線失敗:"+e);}
     }
 
     function checkReady() {
-        if (document.getElementById('ledStatus').className.includes('ok') && 
-            document.getElementById('btnStatus').className.includes('ok')) {
-            document.getElementById('startBtn').style.display = 'inline-block';
+        if(ledChar && document.getElementById('btnStatus').className.includes("status-ok")){
+            document.getElementById('startBtn').style.display = "inline-block";
         }
     }
 
-    // --- 遊戲核心邏輯 ---
+    // --- 遊戲邏輯 ---
     function startGame() {
-        // 1. 讀取樂譜
-        const val = document.getElementById('songSelect').value;
-        currentSong = val.split(',').map(Number); // 轉成數字陣列
-        noteIndex = 0;
-        isGameRunning = true;
-
-        // 2. 介面初始化
-        document.getElementById('gameArea').style.display = 'block';
-        document.getElementById('controlBox').style.display = 'none';
-        document.getElementById('fullScore').innerText = "樂譜: " + currentSong.join(" ");
-        document.getElementById('timeDisplay').innerText = "0.00";
+        song = document.getElementById('songSelect').value.split(',').map(Number);
+        index = 0;
+        isPlaying = true;
         
-        // 3. 開始計時與亮第一個燈
+        document.getElementById('controlBox').style.display = 'none';
+        document.getElementById('gameArea').style.display = 'block';
+        document.getElementById('songPreview').innerText = "樂譜長度: " + song.length + " 個音";
+        document.getElementById('timeDisplay').innerText = "0.00";
+
         startTime = Date.now();
-        timerInterval = setInterval(() => {
+        timerInt = setInterval(() => {
             let t = (Date.now() - startTime) / 1000;
             document.getElementById('timeDisplay').innerText = t.toFixed(2);
-        }, 50);
+        }, 30);
 
-        playNextNote();
+        playNote(); // 亮第一個燈
     }
 
-    function playNextNote() {
-        if (noteIndex >= currentSong.length) {
-            endGame();
+    function playNote() {
+        if(index >= song.length) {
+            finishGame();
             return;
         }
-
-        let target = currentSong[noteIndex];
-        document.getElementById('noteDisplay').innerText = "目標: " + target;
+        let target = song[index];
+        document.getElementById('currentNote').innerText = target; // 顯示數字提示
         
-        // 傳送指令給 ESP32 亮燈 (傳送字元 '1'~'5')
-        if (ledCharacteristic) {
-            let cmd = new TextEncoder().encode(String(target));
-            ledCharacteristic.writeValue(cmd);
-        }
+        // 發送訊號給 ESP32
+        if(ledChar) ledChar.writeValue(new TextEncoder().encode(String(target)));
     }
 
-    function handleButtonInput(event) {
-        if (!isGameRunning) return;
-
-        // 讀取按鈕板傳來的訊號 ('1', '2', '3'...)
+    function onBtnPress(event) {
+        if(!isPlaying) return;
+        
+        // 讀取按鈕訊號
         let val = new TextDecoder().decode(event.target.value);
-        let pressedBtn = parseInt(val);
+        let pressed = parseInt(val);
+        let target = song[index];
 
-        let target = currentSong[noteIndex];
+        console.log("目標:", target, "按下:", pressed);
 
-        // 核心規則：只有按對了那一顆按鈕，遊戲才會繼續
-        if (pressedBtn === target) {
-            console.log("正確！換下一個");
-            noteIndex++;
-            playNextNote();
-        } else {
-            console.log("按錯了！目標是 " + target + " 你按了 " + pressedBtn);
-            // 可以在這裡加個錯誤音效，目前設定是不反應
+        // 判定：只有按對了才跳下一個
+        if(pressed === target) {
+            index++;
+            playNote();
         }
     }
 
-    function endGame() {
-        isGameRunning = false;
-        clearInterval(timerInterval);
+    function finishGame() {
+        isPlaying = false;
+        clearInterval(timerInt);
+        let finalTime = document.getElementById('timeDisplay').innerText;
         
         // 關燈
-        if (ledCharacteristic) {
-            ledCharacteristic.writeValue(new TextEncoder().encode('0'));
-        }
+        if(ledChar) ledChar.writeValue(new TextEncoder().encode('0'));
 
-        let finalTime = document.getElementById('timeDisplay').innerText;
-        document.getElementById('noteDisplay').innerText = "🎉 完成！";
-        document.getElementById('instruction').innerHTML = "總時間: <b style='font-size:40px'>" + finalTime + "</b> 秒";
-        
-        // 顯示重玩按鈕
+        document.getElementById('currentNote').innerText = "🎉";
         setTimeout(() => {
-            if(confirm("恭喜完成！總耗時 " + finalTime + " 秒。\n要再玩一次嗎？")) {
-                document.getElementById('gameArea').style.display = 'none';
-                document.getElementById('controlBox').style.display = 'block';
-            }
-        }, 500);
+            alert("恭喜完成！總時間: " + finalTime + " 秒");
+            document.getElementById('gameArea').style.display = 'none';
+            document.getElementById('controlBox').style.display = 'block';
+        }, 200);
     }
 </script>
-
 </body>
 </html>
