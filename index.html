@@ -1,104 +1,149 @@
 <!DOCTYPE html>
-<html>
+<html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>極簡雙板測試</title>
+    <title>ESP32 鋼琴燈光控制中控</title>
     <style>
-        body { background-color: #eee; text-align: center; font-family: sans-serif; padding: 50px;}
-        button { font-size: 20px; padding: 15px 30px; margin: 10px; cursor: pointer; }
-        #status { font-size: 24px; color: #333; margin: 20px; font-weight: bold;}
-        .box { width: 100px; height: 100px; background: #ccc; margin: 20px auto; border-radius: 50%; border: 5px solid #666;}
-        .active { background-color: red; box-shadow: 0 0 20px red; border-color: red;}
+        body { font-family: 'Microsoft JhengHei', sans-serif; text-align: center; padding: 20px; background-color: #f4f4f4; }
+        .container { max-width: 600px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
+        h1 { color: #333; }
+        .status-box { margin: 20px 0; padding: 15px; border: 1px solid #ddd; border-radius: 5px; }
+        .connected { background-color: #d4edda; color: #155724; border-color: #c3e6cb; }
+        .disconnected { background-color: #f8d7da; color: #721c24; border-color: #f5c6cb; }
+        button { padding: 10px 20px; font-size: 16px; cursor: pointer; background-color: #007bff; color: white; border: none; border-radius: 5px; margin: 5px; }
+        button:disabled { background-color: #ccc; cursor: not-allowed; }
+        .log { margin-top: 20px; text-align: left; background: #eee; padding: 10px; height: 150px; overflow-y: scroll; font-family: monospace; }
     </style>
 </head>
 <body>
 
-    <h2>第一步：連接兩個裝置</h2>
-    <button id="btnA">1. 連接按鈕板 (TEST_BTN_BOARD)</button>
-    <button id="btnB">2. 連接燈光板 (TEST_LED_BOARD)</button>
+<div class="container">
+    <h1>ESP32 鋼琴燈光中控台</h1>
+    <p>請依序連接兩個裝置，網頁會自動將訊號串聯。</p>
 
-    <div id="status">等待連線...</div>
+    <div id="statusLed" class="status-box disconnected">1. 燈光板 (LED): 未連線</div>
+    <button id="btnConnectLed" onclick="connectLed()">連接燈光板 (ESP32_LED_Control)</button>
 
-    <h2>第二步：按下實體按鈕測試</h2>
-    <div id="visualBox" class="box"></div>
+    <div id="statusBtn" class="status-box disconnected">2. 按鈕板 (Button): 未連線</div>
+    <button id="btnConnectBtn" onclick="connectButton()" disabled>連接按鈕板 (ESP32_Button_Input)</button>
 
-    <script>
-        // UUID 設定
-        const BTN_SERVICE = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
-        const BTN_TX_UUID = "6e400003-b5a3-f393-e0a9-e50e24dcca9e"; 
-        
-        const LED_SERVICE = "6e400001-b5a3-f393-e0a9-e50e24dcca9f";
-        const LED_RX_UUID = "6e400002-b5a3-f393-e0a9-e50e24dcca9f";
+    <div class="log" id="logArea">系統記錄...</div>
+</div>
 
-        let rxCharLED; // 這是要傳給燈的通道
+<script>
+    // 定義 UUID (必須與 ESP32 程式碼一致)
+    const LED_SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
+    const LED_CHAR_UUID    = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
 
-        // --- 連接按鈕板 ---
-        document.getElementById('btnA').addEventListener('click', async () => {
-            try {
-                const device = await navigator.bluetooth.requestDevice({
-                    filters: [{ name: 'TEST_BTN_BOARD' }],
-                    optionalServices: [BTN_SERVICE]
-                });
-                const server = await device.gatt.connect();
-                const service = await server.getPrimaryService(BTN_SERVICE);
-                const txChar = await service.getCharacteristic(BTN_TX_UUID);
-                await txChar.startNotifications();
-                txChar.addEventListener('characteristicvaluechanged', handleInput);
-                
-                document.getElementById('btnA').innerText = "按鈕板 OK";
-                document.getElementById('btnA').disabled = true;
-                checkStatus();
-            } catch (e) { alert(e); }
-        });
+    const BTN_SERVICE_UUID = "1234c201-1fb5-459e-8fcc-c5c9c331914b";
+    const BTN_CHAR_UUID    = "5678483e-36e1-4688-b7f5-ea07361b26a8";
 
-        // --- 連接燈光板 ---
-        document.getElementById('btnB').addEventListener('click', async () => {
-            try {
-                const device = await navigator.bluetooth.requestDevice({
-                    filters: [{ name: 'TEST_LED_BOARD' }],
-                    optionalServices: [LED_SERVICE]
-                });
-                const server = await device.gatt.connect();
-                const service = await server.getPrimaryService(LED_SERVICE);
-                rxCharLED = await service.getCharacteristic(LED_RX_UUID);
+    // 變數存儲
+    let ledCharacteristic = null;
+    let btnCharacteristic = null;
 
-                document.getElementById('btnB').innerText = "燈光板 OK";
-                document.getElementById('btnB').disabled = true;
-                checkStatus();
-            } catch (e) { alert(e); }
-        });
+    function log(msg) {
+        const logArea = document.getElementById('logArea');
+        logArea.innerHTML += `<div>> ${msg}</div>`;
+        logArea.scrollTop = logArea.scrollHeight;
+    }
 
-        function checkStatus() {
-            if (document.getElementById('btnA').disabled && document.getElementById('btnB').disabled) {
-                document.getElementById('status').innerText = "測試開始！請按實體按鈕";
-            }
-        }
+    // --- 第一步：連接燈光板 ---
+    async function connectLed() {
+        try {
+            log("正在搜尋燈光板 (ESP32_LED_Control)...");
+            const device = await navigator.bluetooth.requestDevice({
+                filters: [{ name: 'ESP32_LED_Control' }],
+                optionalServices: [LED_SERVICE_UUID]
+            });
 
-        // --- 核心邏輯：收到 A -> 控制 B ---
-        async function handleInput(event) {
-            let val = new TextDecoder().decode(event.target.value);
-            let char = val.charAt(0); // 收到 'A' 或 'a'
+            log("已選擇裝置，正在連線 GATT Server...");
+            const server = await device.gatt.connect();
             
-            let box = document.getElementById("visualBox");
+            log("正在獲取燈光服務...");
+            const service = await server.getPrimaryService(LED_SERVICE_UUID);
+            
+            log("正在獲取燈光特徵值...");
+            ledCharacteristic = await service.getCharacteristic(LED_CHAR_UUID);
 
-            if (char === 'A') {
-                // 按下
-                box.classList.add("active");
-                document.getElementById('status').innerText = "按鈕狀態：按下";
-                
-                // 發送 '1' 給燈光板
-                if(rxCharLED) await rxCharLED.writeValue(new TextEncoder().encode("1"));
+            document.getElementById('statusLed').innerText = "1. 燈光板 (LED): 已連線 ✅";
+            document.getElementById('statusLed').className = "status-box connected";
+            document.getElementById('btnConnectLed').disabled = true;
+            document.getElementById('btnConnectBtn').disabled = false; // 開放連接第二個
+            log("燈光板連線成功！請繼續連接按鈕板。");
 
-            } else if (char === 'a') {
-                // 放開
-                box.classList.remove("active");
-                document.getElementById('status').innerText = "按鈕狀態：放開";
+            // 斷線處理
+            device.addEventListener('gattserverdisconnected', () => {
+                log("警告：燈光板已斷線！");
+                alert("燈光板斷線，請重新整理網頁重連。");
+            });
 
-                // 發送 '0' 給燈光板
-                if(rxCharLED) await rxCharLED.writeValue(new TextEncoder().encode("0"));
-            }
+        } catch (error) {
+            log("燈光板連線失敗: " + error);
         }
-    </script>
+    }
+
+    // --- 第二步：連接按鈕板 ---
+    async function connectButton() {
+        try {
+            log("正在搜尋按鈕板 (ESP32_Button_Input)...");
+            const device = await navigator.bluetooth.requestDevice({
+                filters: [{ name: 'ESP32_Button_Input' }],
+                optionalServices: [BTN_SERVICE_UUID]
+            });
+
+            log("已選擇裝置，正在連線 GATT Server...");
+            const server = await device.gatt.connect();
+
+            log("正在獲取按鈕服務...");
+            const service = await server.getPrimaryService(BTN_SERVICE_UUID);
+
+            log("正在獲取按鈕特徵值...");
+            btnCharacteristic = await service.getCharacteristic(BTN_CHAR_UUID);
+
+            log("啟用通知 (Notifications)...");
+            await btnCharacteristic.startNotifications();
+            
+            // 設定監聽：當收到按鈕訊號時執行
+            btnCharacteristic.addEventListener('characteristicvaluechanged', handleButtonChange);
+
+            document.getElementById('statusBtn').innerText = "2. 按鈕板 (Button): 已連線 ✅";
+            document.getElementById('statusBtn').className = "status-box connected";
+            document.getElementById('btnConnectBtn').disabled = true;
+            log("系統全部就緒！請按下實體按鈕測試。");
+
+        } catch (error) {
+            log("按鈕板連線失敗: " + error);
+        }
+    }
+
+    // --- 核心邏輯：收到訊號 -> 控制燈光 ---
+    async function handleButtonChange(event) {
+        if (!ledCharacteristic) {
+            log("錯誤：燈光板未連線，無法控制燈光。");
+            return;
+        }
+
+        const value = new TextDecoder().decode(event.target.value);
+        log(`收到按鈕訊號: ${value}`);
+
+        try {
+            if (value === 'P') { // 按下
+                log("傳送開燈指令 -> LED板");
+                const encoder = new TextEncoder();
+                await ledCharacteristic.writeValue(encoder.encode('1'));
+            } 
+            else if (value === 'R') { // 放開
+                log("傳送關燈指令 -> LED板");
+                const encoder = new TextEncoder();
+                await ledCharacteristic.writeValue(encoder.encode('0'));
+            }
+        } catch (e) {
+            log("發送指令失敗: " + e);
+        }
+    }
+</script>
+
 </body>
 </html>
