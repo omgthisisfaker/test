@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>ESP32 音樂反應挑戰 (有聲版)</title>
+    <title>ESP32 音樂反應挑戰 (WAV音檔版)</title>
     <style>
         body { font-family: 'Microsoft JhengHei', sans-serif; text-align: center; background: #222; color: white; padding-top: 20px;}
         .box { border: 1px solid #555; padding: 20px; margin: 15px auto; max-width: 500px; border-radius: 10px; background: #333; }
@@ -14,13 +14,15 @@
         #gameArea { display: none; margin-top: 30px; }
         .timer { font-size: 40px; color: #00d2ff; font-family: monospace; }
         .note-display { font-size: 80px; color: yellow; font-weight: bold; margin: 20px 0; }
-        .score-text { color: #aaa; margin-top: 10px; font-size: 14px;}
         .instruction { color: #ff9999; font-size: 18px; margin-bottom: 10px;}
+        
+        /* 測試區 */
+        .debug-area { margin-top: 50px; border-top: 1px solid #555; padding-top: 20px; color: gray; font-size: 0.8em; }
     </style>
 </head>
 <body>
 
-    <h1>🎵 5鍵反應速度挑戰 (有聲版)</h1>
+    <h1>🎵 實體按鈕音樂挑戰 (WAV版)</h1>
 
     <div class="box">
         <h3>1. 裝置連線</h3>
@@ -35,17 +37,23 @@
             <option value="5,3,3,4,2,2,1,2,3,4,5,5,5">小蜜蜂</option>
             <option value="3,3,3,3,3,3,3,5,1,2,3">聖誕鈴聲</option>
             <option value="1,2,3,4,5,5,4,3,2,1">音階來回跑</option>
-            <option value="1,3,5,2,4,1,5,3,4,2">魔鬼亂跳</option>
         </select>
+        <br><br>
+        <div style="color: yellow; margin-bottom: 10px;">⚠️ 請先點擊下方按鈕測試聲音</div>
+        <button onclick="testAudio()">🔊 測試音效 (Test Audio)</button>
         <br><br>
         <button id="startBtn" class="btn-start" onclick="startGame()">開始遊戲！</button>
     </div>
 
     <div id="gameArea">
-        <div class="instruction">跟著聲音與燈光按下按鈕！</div>
+        <div class="instruction">看到燈亮 -> 按下對應按鈕 -> 發出聲音</div>
         <div class="timer"><span id="timeDisplay">0.00</span> 秒</div>
         <div class="note-display" id="currentNote">-</div>
-        <div class="score-text" id="songPreview"></div>
+        <div id="logMsg" style="font-size: 14px; color: #aaa;">等待操作...</div>
+    </div>
+
+    <div class="debug-area">
+        <p>除錯訊息 (Debug): <span id="debugText">無</span></p>
     </div>
 
 <script>
@@ -62,45 +70,39 @@
     let startTime = 0;
     let timerInt = null;
 
-    // --- 音效引擎 (Web Audio API) ---
-    let audioCtx = null;
-    
-    // 音頻頻率 (對應 Do, Re, Mi, Fa, Sol)
-    // 1=C4, 2=D4, 3=E4, 4=F4, 5=G4
-    const NOTES = {
-        1: 261.63,
-        2: 293.66,
-        3: 329.63,
-        4: 349.23,
-        5: 392.00
+    // --- 音效檔案載入 ---
+    // 預先載入 1.wav ~ 5.wav
+    const sounds = {
+        1: new Audio('1.wav'),
+        2: new Audio('2.wav'),
+        3: new Audio('3.wav'),
+        4: new Audio('4.wav'),
+        5: new Audio('5.wav')
     };
 
-    function initAudio() {
-        if (!audioCtx) {
-            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        }
+    function log(msg) {
+        document.getElementById('debugText').innerText = msg;
+        console.log(msg);
     }
 
-    function playTone(note, duration = 0.3) {
-        if (!audioCtx) return;
-        if (!NOTES[note]) return;
+    // 測試聲音用 (因為瀏覽器會阻擋自動播放，必須先由使用者點擊觸發一次)
+    function testAudio() {
+        log("播放測試音效: 1.wav");
+        sounds[1].currentTime = 0;
+        sounds[1].play().then(() => {
+            log("測試音效播放成功！");
+        }).catch(e => {
+            alert("播放失敗！請確認 1.wav 檔案是否存在，且網頁有權限播放聲音。\n錯誤: " + e);
+        });
+    }
 
-        const osc = audioCtx.createOscillator();
-        const gainNode = audioCtx.createGain();
-
-        osc.type = 'triangle'; // 波形：sine, square, triangle, sawtooth
-        osc.frequency.value = NOTES[note];
-        
-        osc.connect(gainNode);
-        gainNode.connect(audioCtx.destination);
-
-        osc.start();
-        
-        // 聲音淡出效果，避免爆音
-        gainNode.gain.setValueAtTime(0.1, audioCtx.currentTime);
-        gainNode.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + duration);
-
-        osc.stop(audioCtx.currentTime + duration);
+    // 播放指定音檔
+    function playSound(id) {
+        if (sounds[id]) {
+            sounds[id].pause();       // 先停止前一個聲音 (避免重疊太亂)
+            sounds[id].currentTime = 0; // 重頭播放
+            sounds[id].play().catch(e => log("播放錯誤: " + e));
+        }
     }
 
     // --- 連線功能 ---
@@ -138,20 +140,19 @@
 
     // --- 遊戲邏輯 ---
     function startGame() {
-        // 啟動聲音引擎 (瀏覽器規定必須在互動後啟動)
-        initAudio();
-        if (audioCtx.state === 'suspended') {
-            audioCtx.resume();
-        }
-
         song = document.getElementById('songSelect').value.split(',').map(Number);
         index = 0;
         isPlaying = true;
         
         document.getElementById('controlBox').style.display = 'none';
         document.getElementById('gameArea').style.display = 'block';
-        document.getElementById('songPreview').innerText = "樂譜長度: " + song.length + " 個音";
         document.getElementById('timeDisplay').innerText = "0.00";
+
+        // 為了確保手機/平板也能播聲音，在開始時把所有聲音「快速過水」解鎖
+        for(let i=1; i<=5; i++) {
+            sounds[i].muted = true;
+            sounds[i].play().then(() => { sounds[i].pause(); sounds[i].muted = false; });
+        }
 
         startTime = Date.now();
         timerInt = setInterval(() => {
@@ -159,7 +160,7 @@
             document.getElementById('timeDisplay').innerText = t.toFixed(2);
         }, 30);
 
-        playNote(); // 亮第一個燈
+        playNote(); // 亮第一個燈 (但不發聲)
     }
 
     function playNote() {
@@ -169,31 +170,35 @@
         }
         let target = song[index];
         document.getElementById('currentNote').innerText = target;
+        document.getElementById('logMsg').innerText = "請按按鈕: " + target;
         
-        // 1. 發送藍牙訊號亮燈
+        // 只發送亮燈訊號，不播聲音
         if(ledChar) ledChar.writeValue(new TextEncoder().encode(String(target)));
-
-        // 2. 網頁發出聲音提示
-        playTone(target, 0.5); 
     }
 
     function onBtnPress(event) {
         if(!isPlaying) return;
         
-        // 讀取按鈕訊號
+        // 1. 讀取按鈕訊號
         let val = new TextDecoder().decode(event.target.value);
         let pressed = parseInt(val);
+        
+        log("收到按鈕: " + pressed);
+
+        // 2. 【關鍵修改】按下按鈕立刻發出對應聲音
+        if (pressed >= 1 && pressed <= 5) {
+            playSound(pressed);
+        }
+
+        // 3. 判定是否正確
         let target = song[index];
-
-        console.log("目標:", target, "按下:", pressed);
-
-        // 判定：只有按對了才跳下一個
         if(pressed === target) {
             index++;
-            playNote(); // 播放下一個音
+            // 稍微延遲一點點再亮下一個燈，讓聲音聽起來有節奏感
+            setTimeout(playNote, 100); 
         } else {
-            // 按錯時可以加個錯誤音效(選配)
-            // playTone(1, 0.1); 
+            // 按錯了，聲音還是會出來(上面已經播了)，但燈不會變
+            document.getElementById('logMsg').innerText = "❌ 按錯了！目標是 " + target;
         }
     }
 
@@ -207,11 +212,10 @@
 
         document.getElementById('currentNote').innerText = "🎉";
         
-        // 播放勝利音效 (Do-Mi-Sol-Do)
-        setTimeout(() => playTone(1, 0.2), 0);
-        setTimeout(() => playTone(3, 0.2), 200);
-        setTimeout(() => playTone(5, 0.2), 400);
-        setTimeout(() => playTone(1, 0.4), 600); // 高音Do頻率沒寫，這裡暫時用低音Do代替，或者你可以加進字典
+        // 播放勝利音效 (快速播 1-3-5)
+        setTimeout(() => playSound(1), 0);
+        setTimeout(() => playSound(3), 200);
+        setTimeout(() => playSound(5), 400);
 
         setTimeout(() => {
             alert("恭喜完成！總時間: " + finalTime + " 秒");
