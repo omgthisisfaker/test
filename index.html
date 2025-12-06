@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>ESP32 音樂反應挑戰 (WAV音檔版)</title>
+    <title>ESP32 鋼琴遊戲 (按錯靜音版)</title>
     <style>
         body { font-family: 'Microsoft JhengHei', sans-serif; text-align: center; background: #222; color: white; padding-top: 20px;}
         .box { border: 1px solid #555; padding: 20px; margin: 15px auto; max-width: 500px; border-radius: 10px; background: #333; }
@@ -16,13 +16,12 @@
         .note-display { font-size: 80px; color: yellow; font-weight: bold; margin: 20px 0; }
         .instruction { color: #ff9999; font-size: 18px; margin-bottom: 10px;}
         
-        /* 測試區 */
         .debug-area { margin-top: 50px; border-top: 1px solid #555; padding-top: 20px; color: gray; font-size: 0.8em; }
     </style>
 </head>
 <body>
 
-    <h1>🎵 實體按鈕音樂挑戰 (WAV版)</h1>
+    <h1>🎵 實體按鈕音樂挑戰 (按錯靜音版)</h1>
 
     <div class="box">
         <h3>1. 裝置連線</h3>
@@ -33,13 +32,15 @@
     <div class="box" id="controlBox">
         <h3>2. 選擇關卡</h3>
         <select id="songSelect" style="padding: 10px; font-size: 16px; width: 80%;">
-            <option value="3,2,1,2,3,3,3,2,2,2,3,5,5">瑪莉有隻小綿羊</option>
-            <option value="5,3,3,4,2,2,1,2,3,4,5,5,5">小蜜蜂</option>
-            <option value="3,3,3,3,3,3,3,5,1,2,3">聖誕鈴聲</option>
-            <option value="1,2,3,4,5,5,4,3,2,1">音階來回跑</option>
+            <option value="3,2,1,2,3,3,3,2,2,2,3,5,5,3,2,1,2,3,3,3,3,2,2,3,2,1">瑪莉有隻小綿羊 (完整版)</option>
+            <option value="5,3,3,4,2,2,1,2,3,4,5,5,5,2,2,2,2,2,3,4,3,3,3,3,3,4,5,5,3,3,4,2,2,1,3,5,5,1">小蜜蜂 (完整版)</option>
+            <option value="3,3,3,3,3,3,3,5,1,2,3,4,4,4,4,4,3,3,3,3,2,2,1,2,5">聖誕鈴聲 (完整版)</option>
+            <option value="1,2,3,4,5,5,4,3,2,1,1,2,3,4,5,5,4,3,2,1">音階來回跑 (兩趟)</option>
+            <option value="1,3,5,2,4,1,5,3,4,2,3,1,4,2,5,1,3,2,4,5">魔鬼亂跳 (20連擊)</option>
         </select>
         <br><br>
-        <div style="color: yellow; margin-bottom: 10px;">⚠️ 請先點擊下方按鈕測試聲音</div>
+        
+        <div style="color: yellow; margin-bottom: 10px;">⚠️ 請務必先點擊下方測試按鈕</div>
         <button onclick="testAudio()">🔊 測試音效 (Test Audio)</button>
         <br><br>
         <button id="startBtn" class="btn-start" onclick="startGame()">開始遊戲！</button>
@@ -53,11 +54,10 @@
     </div>
 
     <div class="debug-area">
-        <p>除錯訊息 (Debug): <span id="debugText">無</span></p>
+        <p>除錯訊息: <span id="debugText">無</span></p>
     </div>
 
 <script>
-    // --- 藍牙 UUID 設定 ---
     const LED_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
     const LED_CHAR = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
     const BTN_UUID = "1234c201-1fb5-459e-8fcc-c5c9c331914b";
@@ -70,42 +70,27 @@
     let startTime = 0;
     let timerInt = null;
 
-    // --- 音效檔案載入 ---
-    // 預先載入 1.wav ~ 5.wav
+    // 載入音檔
     const sounds = {
-        1: new Audio('1.wav'),
-        2: new Audio('2.wav'),
-        3: new Audio('3.wav'),
-        4: new Audio('4.wav'),
-        5: new Audio('5.wav')
+        1: new Audio('1.wav'), 2: new Audio('2.wav'), 3: new Audio('3.wav'),
+        4: new Audio('4.wav'), 5: new Audio('5.wav')
     };
 
-    function log(msg) {
-        document.getElementById('debugText').innerText = msg;
-        console.log(msg);
-    }
+    function log(msg) { document.getElementById('debugText').innerText = msg; console.log(msg); }
 
-    // 測試聲音用 (因為瀏覽器會阻擋自動播放，必須先由使用者點擊觸發一次)
     function testAudio() {
-        log("播放測試音效: 1.wav");
         sounds[1].currentTime = 0;
-        sounds[1].play().then(() => {
-            log("測試音效播放成功！");
-        }).catch(e => {
-            alert("播放失敗！請確認 1.wav 檔案是否存在，且網頁有權限播放聲音。\n錯誤: " + e);
-        });
+        sounds[1].play().then(() => alert("聲音正常！可開始遊戲。")).catch(e => alert("播放失敗: " + e));
     }
 
-    // 播放指定音檔
     function playSound(id) {
         if (sounds[id]) {
-            sounds[id].pause();       // 先停止前一個聲音 (避免重疊太亂)
-            sounds[id].currentTime = 0; // 重頭播放
-            sounds[id].play().catch(e => log("播放錯誤: " + e));
+            sounds[id].pause();
+            sounds[id].currentTime = 0;
+            sounds[id].play().catch(e => {});
         }
     }
 
-    // --- 連線功能 ---
     async function connectLed() {
         try {
             const dev = await navigator.bluetooth.requestDevice({filters: [{name:'ESP32_LED_Control'}], optionalServices:[LED_UUID]});
@@ -138,20 +123,17 @@
         }
     }
 
-    // --- 遊戲邏輯 ---
     function startGame() {
         song = document.getElementById('songSelect').value.split(',').map(Number);
         index = 0;
         isPlaying = true;
-        
         document.getElementById('controlBox').style.display = 'none';
         document.getElementById('gameArea').style.display = 'block';
-        document.getElementById('timeDisplay').innerText = "0.00";
-
-        // 為了確保手機/平板也能播聲音，在開始時把所有聲音「快速過水」解鎖
+        
+        // 靜音解鎖瀏覽器限制
         for(let i=1; i<=5; i++) {
             sounds[i].muted = true;
-            sounds[i].play().then(() => { sounds[i].pause(); sounds[i].muted = false; });
+            sounds[i].play().then(() => { sounds[i].pause(); sounds[i].muted = false; }).catch(e=>{});
         }
 
         startTime = Date.now();
@@ -159,8 +141,7 @@
             let t = (Date.now() - startTime) / 1000;
             document.getElementById('timeDisplay').innerText = t.toFixed(2);
         }, 30);
-
-        playNote(); // 亮第一個燈 (但不發聲)
+        playNote();
     }
 
     function playNote() {
@@ -171,33 +152,27 @@
         let target = song[index];
         document.getElementById('currentNote').innerText = target;
         document.getElementById('logMsg').innerText = "請按按鈕: " + target;
-        
-        // 只發送亮燈訊號，不播聲音
+        // 發送訊號亮燈 (只亮燈，不發聲)
         if(ledChar) ledChar.writeValue(new TextEncoder().encode(String(target)));
     }
 
+    // --- 這裡就是修正的地方 ---
     function onBtnPress(event) {
         if(!isPlaying) return;
         
-        // 1. 讀取按鈕訊號
         let val = new TextDecoder().decode(event.target.value);
         let pressed = parseInt(val);
-        
-        log("收到按鈕: " + pressed);
-
-        // 2. 【關鍵修改】按下按鈕立刻發出對應聲音
-        if (pressed >= 1 && pressed <= 5) {
-            playSound(pressed);
-        }
-
-        // 3. 判定是否正確
         let target = song[index];
+
+        log("收到: " + pressed + " 目標: " + target);
+
+        // 【修正重點】只有在按下正確按鈕時，才執行 playSound
         if(pressed === target) {
+            playSound(pressed); // 叮咚！按對了才會有聲音
             index++;
-            // 稍微延遲一點點再亮下一個燈，讓聲音聽起來有節奏感
-            setTimeout(playNote, 100); 
+            setTimeout(playNote, 50); // 稍微延遲避免卡頓
         } else {
-            // 按錯了，聲音還是會出來(上面已經播了)，但燈不會變
+            // 按錯了：這裡什麼都不做，所以不會有聲音
             document.getElementById('logMsg').innerText = "❌ 按錯了！目標是 " + target;
         }
     }
@@ -205,20 +180,16 @@
     function finishGame() {
         isPlaying = false;
         clearInterval(timerInt);
-        let finalTime = document.getElementById('timeDisplay').innerText;
-        
-        // 關燈
         if(ledChar) ledChar.writeValue(new TextEncoder().encode('0'));
-
         document.getElementById('currentNote').innerText = "🎉";
         
-        // 播放勝利音效 (快速播 1-3-5)
+        // 勝利音效
         setTimeout(() => playSound(1), 0);
         setTimeout(() => playSound(3), 200);
         setTimeout(() => playSound(5), 400);
 
         setTimeout(() => {
-            alert("恭喜完成！總時間: " + finalTime + " 秒");
+            alert("恭喜完成！總時間: " + document.getElementById('timeDisplay').innerText + " 秒");
             document.getElementById('gameArea').style.display = 'none';
             document.getElementById('controlBox').style.display = 'block';
         }, 1000);
